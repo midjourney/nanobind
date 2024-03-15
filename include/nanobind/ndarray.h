@@ -91,6 +91,7 @@ struct ro { };
 template <typename T> struct ndarray_traits {
     static constexpr bool is_complex = detail::is_complex<T>::value;
     static constexpr bool is_float   = std::is_floating_point_v<T>;
+    static constexpr bool is_bfloat  = false;
     static constexpr bool is_bool    = std::is_same_v<std::remove_cv_t<T>, bool>;
     static constexpr bool is_int     = std::is_integral_v<T> && !is_bool;
     static constexpr bool is_signed  = std::is_signed_v<T>;
@@ -100,8 +101,9 @@ NAMESPACE_BEGIN(detail)
 
 template <typename T>
 constexpr bool is_ndarray_scalar_v =
-    ndarray_traits<T>::is_float || ndarray_traits<T>::is_int ||
-    ndarray_traits<T>::is_bool || ndarray_traits<T>::is_complex;
+    ndarray_traits<T>::is_float || ndarray_traits<T>::is_int || 
+    ndarray_traits<T>::is_bfloat || ndarray_traits<T>::is_bool || 
+    ndarray_traits<T>::is_complex;
 
 template <typename> struct ndim_shape;
 template <size_t... S> struct ndim_shape<std::index_sequence<S...>> {
@@ -122,6 +124,8 @@ template <typename T> constexpr dlpack::dtype dtype() {
 
     if constexpr (ndarray_traits<T>::is_float)
         result.code = (uint8_t) dlpack::dtype_code::Float;
+    else if constexpr (ndarray_traits<T>::is_bfloat)
+        result.code = (uint8_t) dlpack::dtype_code::Bfloat;
     else if constexpr (ndarray_traits<T>::is_complex)
         result.code = (uint8_t) dlpack::dtype_code::Complex;
     else if constexpr (ndarray_traits<T>::is_signed)
@@ -164,6 +168,21 @@ template <typename T> struct ndarray_arg<T, enable_if_t<ndarray_traits<T>::is_fl
 
     static constexpr auto name =
         const_name("dtype=float") +
+        const_name<sizeof(T) * 8>() +
+        const_name<std::is_const_v<T>>(", writable=False", "");
+
+    static void apply(ndarray_req &tr) {
+        tr.dtype = dtype<T>();
+        tr.req_dtype = true;
+        tr.req_ro = std::is_const_v<T>;
+    }
+};
+
+template <typename T> struct ndarray_arg<T, enable_if_t<ndarray_traits<T>::is_bfloat>> {
+    static constexpr size_t size = 0;
+
+    static constexpr auto name =
+        const_name("dtype=bfloat") +
         const_name<sizeof(T) * 8>() +
         const_name<std::is_const_v<T>>(", writable=False", "");
 
@@ -278,9 +297,9 @@ template <typename... Ts> struct ndarray_info {
 
 template <typename T, typename... Ts> struct ndarray_info<T, Ts...>  : ndarray_info<Ts...> {
     using scalar_type =
-        std::conditional_t<ndarray_traits<T>::is_float || ndarray_traits<T>::is_int ||
-                           ndarray_traits<T>::is_bool || ndarray_traits<T>::is_complex,
-                           T, typename ndarray_info<Ts...>::scalar_type>;
+        std::conditional_t<ndarray_traits<T>::is_float || ndarray_traits<T>::is_bfloat || 
+                           ndarray_traits<T>::is_int || ndarray_traits<T>::is_bool || 
+                           ndarray_traits<T>::is_complex, T, typename ndarray_info<Ts...>::scalar_type>;
 };
 
 template <ssize_t... Is, typename... Ts> struct ndarray_info<shape<Is...>, Ts...> : ndarray_info<Ts...> {
